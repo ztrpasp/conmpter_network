@@ -60,12 +60,11 @@ DWORD WINAPI clientSend(LPVOID lparam) {
     cout<<"发送消息形式: "<<"收信人 消息内容                ";
     cout<<"键入quit退出聊天"<<endl;
     while (true) {
-        
+        cin>>acceptName;
         //获取当前时间
         time_t timep;
         time (&timep);
         strftime(sendTime, sizeof(sendTime), "%Y-%m-%d %H:%M:%S",localtime(&timep) );
-        cin>>acceptName;
         //判断用户是否退出
         if(strcmp("quit",acceptName)==0)
         {
