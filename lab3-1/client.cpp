@@ -61,6 +61,20 @@ bool ConServer(SOCKET socket, SOCKADDR_IN serverAddr)
     {
         return false;
     }
+
+
+    start = clock();
+    while (clock() - start <= 2 * MAX_TIMEOUT) {
+        if (recvfrom(socket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, &addrLen) <= 0)
+            continue;
+        //第三次握手确认包丢失
+        memcpy(buffer, &clientACK, sizeof(RDTHead));
+        sendto(socket, buffer, sizeof(RDTHead), 0, (sockaddr *) &serverAddr, addrLen);
+        cout<<"第三次握手超时重传"<<endl;
+        start = clock();
+    }
+
+
     cout<<"第三次握手成功连接"<<endl;
     u_long imode = 0;
     ioctlsocket(socket, FIONBIO, &imode);//阻塞
@@ -70,7 +84,7 @@ bool ConServer(SOCKET socket, SOCKADDR_IN serverAddr)
 
 
 
-void sendFSM(char *fileBuffer, size_t filelen, SOCKET &socket, SOCKADDR_IN &addr) {
+void send(char *fileBuffer, size_t filelen, SOCKET &socket, SOCKADDR_IN &addr) {
 
     u_long imode = 1;
     ioctlsocket(socket, FIONBIO, &imode); //先进入非阻塞模式
@@ -82,11 +96,13 @@ void sendFSM(char *fileBuffer, size_t filelen, SOCKET &socket, SOCKADDR_IN &addr
     int addrLen = sizeof(addr);
 
     char *dataBuffer = new char[MAX_DATA_SIZE], *pktBuffer = new char[sizeof(RDTPacket)];
-    cout <<"需要传输"<< packetNum << "个数据包" <<endl;
     RDTPacket sendPkt, rcvPkt;   
+
+    cout <<"总共需要传输"<< packetNum << "个数据包" <<endl;
 
     clock_t start;
     while (true) {
+        int dataSize;
         if (num == packetNum) {
             RDTHead endHead;
             setEND(endHead.flag);
@@ -111,17 +127,12 @@ void sendFSM(char *fileBuffer, size_t filelen, SOCKET &socket, SOCKADDR_IN &addr
         }
         switch (stage) {
             case 0:
-                int dataSize;
+                dataSize = MAX_DATA_SIZE;
                 if((num+1)*MAX_DATA_SIZE>filelen)//
                 {
                     dataSize = filelen-num*MAX_DATA_SIZE;
-                    memcpy(dataBuffer, fileBuffer + num * MAX_DATA_SIZE, dataSize);
                 }
-                else 
-                {
-                    memcpy(dataBuffer, fileBuffer + num * MAX_DATA_SIZE, MAX_DATA_SIZE);
-                    dataSize = MAX_DATA_SIZE;
-                }
+                memcpy(dataBuffer, fileBuffer + num * MAX_DATA_SIZE, dataSize);
                 sendPkt = mkPacket(0, dataBuffer, dataSize);
 
                 memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
@@ -130,55 +141,139 @@ void sendFSM(char *fileBuffer, size_t filelen, SOCKET &socket, SOCKADDR_IN &addr
                 stage = 1;
                 break;
             case 1:
-                //time_out
-                while (recvfrom(socket, pkt_buffer, sizeof(packet), 0, (SOCKADDR *) &addr, &addrLen) <= 0) {
-                    if (clock() - start >= MAX_TIME) {
-                        sendto(socket, pkt_buffer, sizeof(packet), 0, (SOCKADDR *) &addr, addrLen);
-                        cout << index << "号数据包超时重传" << endl;
+                //超时的情况
+                while (recvfrom(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, &addrLen) <= 0) {
+                    if (clock() - start >= MAX_TIMEOUT) {
+                        sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
+                        cout << num << "号数据包超时重传" << endl;
                         start = clock();
                     }
                 }
-                memcpy(&pkt, pkt_buffer, sizeof(packet));
-                if (pkt.head.ack == 1 || checkPacketSum((u_short *) &pkt, sizeof(packet)) != 0) {
+                memcpy(&rcvPkt, pktBuffer, sizeof(RDTPacket));
+                
+                //收到重复的包或者校验和错误
+                if (rcvPkt.head.ack == 1 || CalcheckSum((u_short *) &rcvPkt, sizeof(RDTPacket)) != 0) {
                     stage = 1;
                     break;
                 }
-                stage = 2;
-                //cout<<index<<"号数据包传输成功，传输了"<<packetDataLen<<"Bytes数据"<<endl;
-                index++;
+                
+                if (rcvPkt.head.ack == 0 || CalcheckSum((u_short *) &rcvPkt, sizeof(RDTPacket)) == 0) {
+                    stage = 2;
+                    num++;
+                    break;
+                }
                 break;
+                
             case 2:
-                memcpy(data_buffer, fileBuffer + index * MAX_DATA_SIZE, packetDataLen);
-                sendPkt = makePacket(1, data_buffer, packetDataLen);
-                memcpy(pkt_buffer, &sendPkt, sizeof(packet));
-                sendto(socket, pkt_buffer, sizeof(packet), 0, (SOCKADDR *) &addr, addrLen);
+                dataSize = MAX_DATA_SIZE;
+                if((num+1)*MAX_DATA_SIZE>filelen)//
+                {
+                    dataSize = filelen-num*MAX_DATA_SIZE;
+                }
+                memcpy(dataBuffer, fileBuffer + num * MAX_DATA_SIZE, dataSize);
 
-                start = clock();//计时
+                sendPkt = mkPacket(1, dataBuffer, dataSize);
+                memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
+                sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
+                start = clock();
                 stage = 3;
                 break;
             case 3:
-                //time_out
-                while (recvfrom(socket, pkt_buffer, sizeof(packet), 0, (SOCKADDR *) &addr, &addrLen) <= 0) {
-                    if (clock() - start >= MAX_TIME) {
-                        sendto(socket, pkt_buffer, sizeof(packet), 0, (SOCKADDR *) &addr, addrLen);
-                        cout << index << "号数据包超时重传" << endl;
+                //超时情况
+                while (recvfrom(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, &addrLen) <= 0) {
+                    if (clock() - start >= MAX_TIMEOUT) {
+                        sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
+                        cout << num << "号数据包超时重传" << endl;
                         start = clock();
                     }
                 }
-                memcpy(&pkt, pkt_buffer, sizeof(packet));
-                if (pkt.head.ack == 0 || checkPacketSum((u_short *) &pkt, sizeof(packet)) != 0) {
+                memcpy(&rcvPkt, pktBuffer, sizeof(RDTPacket));
+                //收到重复的包或者校验和错误
+                if (rcvPkt.head.ack == 0 || CalcheckSum((u_short *) &rcvPkt, sizeof(RDTPacket)) != 0) {
                     stage = 3;
                     break;
                 }
-                stage = 0;
-                //cout<<index<<"号数据包传输成功，传输了"<<packetDataLen<<"Bytes数据"<<endl;
-                index++;
+                if (rcvPkt.head.ack == 0 || CalcheckSum((u_short *) &rcvPkt, sizeof(RDTPacket)) == 0) {
+                    stage = 0;
+                    num++;
+                    break;
+                }
                 break;
-            default:
-                cout << "error" << endl;
-                return;
         }
     }
+}
+
+
+
+
+bool DisConServer(SOCKET clientSocket, SOCKADDR_IN serverAddr) {
+
+    int addrLen = sizeof(serverAddr);
+    char buffer[sizeof(RDTHead)];
+    RDTHead clientFIN;
+    setFIN_ACK(clientFIN.flag);
+    clientFIN.checkSum = CalcheckSum((u_short *) &clientFIN, sizeof(RDTHead));
+
+
+    memcpy(buffer, &clientFIN, sizeof(RDTHead));
+    sendto(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, addrLen);
+    cout<<"客户端发起第一次挥手进入FIN-WAIT-1状态"<<endl;
+    unsigned long imode = 1;
+    ioctlsocket(clientSocket, FIONBIO, &imode); //改为非阻塞模式
+
+    clock_t start = clock();
+    while (recvfrom(clientSocket, buffer, sizeof(RDTHead), 0, (sockaddr *) &serverAddr, &addrLen) <= 0) {
+        if (clock() - start >= MAX_TIMEOUT) {
+            cout<<"第一次挥手超时重传"<<endl;
+            memcpy(buffer, &clientFIN, sizeof(RDTHead));
+            sendto(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, addrLen);
+            start = clock();
+        }
+    }
+
+    RDTHead serverACK;
+    memcpy(&serverACK, buffer, sizeof(RDTHead));
+
+    if ((isACK(serverACK.flag)) && (CalcheckSum((u_short *) buffer, sizeof(RDTHead) == 0))) {
+        cout << "客户端进入FIN-WAIT-2状态" << endl;
+    } else {
+        cout << "错误" << endl;
+        return false;
+    }
+
+    imode = 0;
+    ioctlsocket(clientSocket, FIONBIO, &imode);//阻塞
+
+    recvfrom(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, &addrLen);
+    RDTHead serverFIN;
+    memcpy(&serverFIN, buffer, sizeof(RDTHead));
+    if ((isFIN_ACK(serverFIN.flag)) && (CalcheckSum((u_short *) buffer, sizeof(RDTHead) == 0))) {
+        cout << "第三次挥手" << endl;
+    } else {
+        cout << "错误" << endl;
+        return false;
+    }
+
+    imode = 1;
+    ioctlsocket(clientSocket, FIONBIO, &imode);
+
+    RDTHead clientACK;
+    setACK(clientACK.flag);
+
+    sendto(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, addrLen);
+    start = clock();
+    while (clock() - start <= 2 * MAX_TIMEOUT) {
+        if (recvfrom(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, &addrLen) <= 0)
+            continue;
+        //确认包丢失
+        memcpy(buffer, &clientACK, sizeof(RDTHead));
+        sendto(clientSocket, buffer, sizeof(RDTHead), 0, (sockaddr *) &serverAddr, addrLen);
+        start = clock();
+    }
+
+    cout << "连接成功关闭" << endl;
+    closesocket(clientSocket);
+    return true;
 }
 
 int main()
@@ -197,13 +292,13 @@ int main()
     }
     SOCKADDR_IN serverAddr;
     serverAddr.sin_family = AF_INET;      //IP格式
-    USHORT uPort = 8888;                  //写死端口号
+    USHORT uPort = 8887;                  //写死端口号
     serverAddr.sin_port = htons(uPort);   //绑定端口号
     serverAddr.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
-    // if (!ConServer(clientSocket, serverAddr)) {
-    //     cout << "连接失败" << endl;
-    //     return 0;
-    // }
+    if (!ConServer(clientSocket, serverAddr)) {
+        cout << "连接失败" << endl;
+        return 0;
+    }
     char fileName[150]="D:\\cpp_vscode\\conmpter_network\\lab3-1\\测试文件\\"; char path[50];
     cout << "请输入需要传输的文件名" << endl;
     cin >> path;
@@ -219,10 +314,8 @@ int main()
     
     // 这是一个存储文件(夹)信息的结构体，其中有文件大小和创建时间、访问时间、修改时间等
 	struct stat statbuf;
-
 	// 提供文件名字符串，获得文件属性结构体
 	stat(fileName, &statbuf);
-	
 	// 获取文件大小
 	size_t fileLen = statbuf.st_size;
 
@@ -231,8 +324,13 @@ int main()
     myfile.close();
     cout << "开始进行传输, 文件大小为:  "<<fileLen<< endl;
 
-    //sendFSM(fileBuffer, fileLen, clientSocket, serverAddr);
+    send(fileBuffer, fileLen, clientSocket, serverAddr);
 
+    if (!DisConServer(clientSocket, serverAddr)) {
+        cout << "关闭连接失败" << endl;
+        return 0;
+    }
+    cout<<"成功关闭连接"<<endl;
 
     system("pause");
     return 0;

@@ -1,7 +1,7 @@
 //用于定义可靠传输协议
 #include<string.h>
 using namespace std;
-#define MAX_DATA_SIZE 1024
+#define MAX_DATA_SIZE 10240
 
 
 #define SYN 0x1
@@ -71,4 +71,16 @@ RDTPacket mkPacket(int seq, char *data, int len) {
     memcpy(pkt.data, data, len);
     pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(RDTPacket));
     return pkt;
+}
+RDTPacket mkPacket(int ack) {
+    RDTPacket pkt;
+    pkt.head.ack = ack;
+    setACK(pkt.head.flag);
+    pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(RDTPacket));
+    return pkt;
+}
+
+void extractPkt(char * Buffer, RDTPacket pkt)
+{
+    memcpy(Buffer, &pkt, sizeof(RDTPacket));
 }
