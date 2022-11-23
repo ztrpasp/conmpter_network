@@ -13,27 +13,24 @@ using namespace std;
 double MAX_TIMEOUT = 1*CLOCKS_PER_SEC; //超时重传时间由于是本机上不同端口上数据传输，先初始化为1s
 
 
-//连接三次握手s
+//三次握手建立连接，只需要发送协议头部分。
 bool ConServer(SOCKET socket, SOCKADDR_IN serverAddr)
 {
-    //第一次握手，只需要发送协议头
+    //第一次握手
     int addrLen = sizeof(serverAddr);
     RDTHead clientSYN;
     setSYN(clientSYN.flag);
+    
     clientSYN.checkSum=CalcheckSum((unsigned short *)&clientSYN, sizeof(clientSYN));
     char buffer[sizeof(clientSYN)];
     memset(buffer, 0, sizeof(clientSYN));
-    memcpy(buffer, &clientSYN, sizeof(clientSYN));
-    sendto(socket, buffer, sizeof(clientSYN), 0, (SOCKADDR *) &serverAddr, addrLen);
-    cout << "第一次握手" << endl;
-
+    sendRDTHead(buffer,&clientSYN,socket,serverAddr);
+    cout << "第一次握手,进入SYN_SEND状态" << endl;
     //第二次握手
     RDTHead serverSYN_ACK;
-    clock_t start =clock();
-
     u_long mode = 1;
     ioctlsocket(socket, FIONBIO, &mode);//设置为非阻塞
-
+    clock_t start =clock();
     while (recvfrom(socket, buffer, sizeof(serverSYN_ACK), 0, (SOCKADDR *) &serverAddr, &addrLen) <= 0) {
         if (clock() - start >= MAX_TIMEOUT) {
             cout<<"第一次握手超时重传"<<endl;
@@ -62,7 +59,7 @@ bool ConServer(SOCKET socket, SOCKADDR_IN serverAddr)
         return false;
     }
 
-
+    cout<<"第三次握手进入TIME-WAIT状态"<<endl;
     start = clock();
     while (clock() - start <= 2 * MAX_TIMEOUT) {
         if (recvfrom(socket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, &addrLen) <= 0)
@@ -75,7 +72,7 @@ bool ConServer(SOCKET socket, SOCKADDR_IN serverAddr)
     }
 
 
-    cout<<"第三次握手成功连接"<<endl;
+    cout<<"第三次握手进入Established状态"<<endl;
     u_long imode = 0;
     ioctlsocket(socket, FIONBIO, &imode);//阻塞
     return true;
@@ -262,16 +259,18 @@ bool DisConServer(SOCKET clientSocket, SOCKADDR_IN serverAddr) {
 
     sendto(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, addrLen);
     start = clock();
+    cout<<"第四次挥手进入TIME-WAIT状态"<<endl;
     while (clock() - start <= 2 * MAX_TIMEOUT) {
         if (recvfrom(clientSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &serverAddr, &addrLen) <= 0)
             continue;
         //确认包丢失
+        cout<<"第四次挥手超时重传"<<endl;
         memcpy(buffer, &clientACK, sizeof(RDTHead));
         sendto(clientSocket, buffer, sizeof(RDTHead), 0, (sockaddr *) &serverAddr, addrLen);
         start = clock();
     }
 
-    cout << "连接成功关闭" << endl;
+    cout << "第四次挥手进入closed状态" << endl;
     closesocket(clientSocket);
     return true;
 }
@@ -300,17 +299,21 @@ int main()
         return 0;
     }
     char fileName[150]="D:\\cpp_vscode\\conmpter_network\\lab3-1\\测试文件\\"; char path[50];
-    cout << "请输入需要传输的文件名" << endl;
-    cin >> path;
-    
-    strcat(fileName,path);
-    ifstream myfile(fileName, ifstream::binary);
-    if (!myfile.is_open())
+    ifstream myfile;
+    while(true)
     {
-        cout << "路径错误" << endl;
-        return 0;
+        cout << "请输入需要传输的文件名" << endl;
+        cin >> path;
+    
+        strcat(fileName,path);
+        myfile.open(fileName, ifstream::binary);
+        if (!myfile.is_open())
+        {
+            cout << "路径错误,请重新确认路径" << endl;
+        }
+        else break;
     }
-
+    
     
     // 这是一个存储文件(夹)信息的结构体，其中有文件大小和创建时间、访问时间、修改时间等
 	struct stat statbuf;

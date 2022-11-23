@@ -28,7 +28,7 @@ bool AcClient(SOCKET socket, SOCKADDR_IN addr)
     serverSYN_ACK.checkSum = CalcheckSum((u_short *) &serverSYN_ACK, sizeof(RDTHead));
     memcpy(buffer, &serverSYN_ACK, sizeof(RDTHead));
     sendto(socket, buffer, sizeof(RDTHead), 0, (sockaddr *) &addr, len);
-    cout<<"第二次握手"<<endl;
+    cout<<"第二次握手进入SYN_RECV状态"<<endl;
 
     u_long imode = 1;
     ioctlsocket(socket, FIONBIO, &imode);//非阻塞
@@ -44,8 +44,10 @@ bool AcClient(SOCKET socket, SOCKADDR_IN addr)
     RDTHead clientACK;
     memcpy(&clientACK, &buffer, sizeof(RDTHead));
     if (isACK(clientACK.flag) && (CalcheckSum((u_short *) buffer, sizeof(RDTHead)) == 0)) {
-        cout << "第三次握手成功" << endl;
-    } else {
+        cout << "第三次握手进入Established状态" << endl;
+    } 
+    else 
+    {
         cout << "第三次握手失败" << endl;
         return false;
     }
@@ -56,7 +58,7 @@ bool AcClient(SOCKET socket, SOCKADDR_IN addr)
 }
 
 bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &filelen) {
-    int stage = 0; //状态
+    int event = 0; //状态
     int num = 0;   //数据包个数
     int dataSize;   //数据包数据段长度
     int addrLen = sizeof(addr);
@@ -65,7 +67,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
     RDTHead overHead;
     while (true) {
         memset(pktBuffer, 0, sizeof(RDTPacket));
-        switch (stage) {
+        switch (event) {
             case 0:
                 //先确认是不是发送的结束包
                 recvfrom(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, &addrLen);
@@ -88,7 +90,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
                     sendPkt = mkPacket(1);
                     memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
                     sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
-                    stage = 0;
+                    event = 0;
                     cout << num  << "号数据包重复或损坏, 抛弃" << endl;
                     break;
                 }
@@ -104,7 +106,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
                     sendPkt = mkPacket(0);
                     memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
                     sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
-                    stage = 1;
+                    event = 1;
                     num++;
                     break;
                 }
@@ -132,7 +134,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
                     sendPkt = mkPacket(0);
                     memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
                     sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
-                    stage = 1;
+                    event = 1;
                     cout << num<< "号数据包重复或损坏, 抛弃" << endl;
                     break;
                 }
@@ -146,7 +148,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
                     sendPkt = mkPacket(1);
                     memcpy(pktBuffer, &sendPkt, sizeof(RDTPacket));
                     sendto(socket, pktBuffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
-                    stage = 0;
+                    event = 0;
                     num++;
                     break;
                 }
@@ -164,7 +166,7 @@ bool DisConClient(SOCKET &serverSocket, SOCKADDR_IN &clientAddr) {
     memcpy(&clientFIN,buffer,sizeof(RDTHead));
 
     if ((isFIN_ACK) && (CalcheckSum((u_short *) buffer, sizeof(RDTHead) == 0))) {
-        cout << "客户端请求断开" << endl;
+        cout << "第一次挥手客户端请求断开" << endl;
     } else {
         cout << "错误" << endl;
         return false;
@@ -175,13 +177,14 @@ bool DisConClient(SOCKET &serverSocket, SOCKADDR_IN &clientAddr) {
     serverACK.checkSum = CalcheckSum((u_short *) &serverACK, sizeof(RDTHead));
     memcpy(buffer, &serverACK, sizeof(RDTHead));
     sendto(serverSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &clientAddr, addrLen);
+    cout<<"第二次挥手进入CLOSE-WAIT状态"<<endl;
 
     RDTHead serverFIN;
     setFIN_ACK(serverFIN.flag);
     serverFIN.checkSum = CalcheckSum((u_short *) &serverFIN, sizeof(RDTHead));
     memcpy(buffer, &serverFIN, sizeof(RDTHead));
     sendto(serverSocket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &clientAddr, addrLen);
-
+    cout<<"第三次挥手进入LAST-ACK状态"<<endl;
     u_long imode = 1;
     ioctlsocket(serverSocket, FIONBIO, &imode);
     clock_t start = clock();
@@ -198,7 +201,7 @@ bool DisConClient(SOCKET &serverSocket, SOCKADDR_IN &clientAddr) {
     RDTHead clientACK;
     memcpy(&clientACK,buffer,sizeof(RDTHead));
     if ((isACK(clientACK.flag)) && (CalcheckSum((u_short *) buffer, sizeof(RDTHead) == 0))) {
-        cout << "成功关闭连接" << endl;
+        cout << "第四次挥手进入closed状态" << endl;
     } else {
         cout << "错误" << endl;
         return false;
@@ -229,6 +232,7 @@ int main()
 
     char *fileBuffer = new char[MAX_FILE_SIZE];
     unsigned long filelen=0;
+    cout<<"开始接受文件"<<endl;
     recv(fileBuffer, serverSocket, clientAddr,filelen);
 
     //写入复制文件

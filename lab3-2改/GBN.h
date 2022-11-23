@@ -2,8 +2,12 @@
 #include<string.h>
 #include<winsock.h>
 using namespace std;
-#define MAX_DATA_SIZE 10240
 
+#define MAX_DATA_SIZE 10240
+#define windowSize 8
+#define MAX_SEQ  4294967295
+unsigned int base=1;
+unsigned int nextseqnum=1;
 
 #define SYN 0x1
 #define ACK 0x2
@@ -23,25 +27,25 @@ bool isACK(char flag){ return (flag & ACK); }
 bool isFIN_ACK(char flag){ return (flag & FIN)&&(flag & ACK); }
 bool isFIN(char flag){ return (flag & FIN); }
 bool isEND(char flag){ return (flag & END); }
-struct RDTHead
+struct Head
 {
     unsigned int seq;//序列号，发送端
     unsigned int ack;//确认号码，发送端和接收端用来控制
     unsigned short checkSum;//校验和 16位
-    unsigned dataSize;      //标识发送的数据的长度,边界判断与校验和
+    unsigned int dataSize;      //标识发送的数据的长度,边界判断与校验和
     char flag;              //ACK，FIN，SYN，END
     
-    RDTHead()
+    Head()
     {
         this->seq=this->ack=0; //
         this->checkSum=this->dataSize=0;
     }
 };
 
-struct RDTPacket
+struct Packet
 {
     /* data */
-    RDTHead head;
+    Head head;
     char data[MAX_DATA_SIZE];
 };
 
@@ -65,37 +69,37 @@ unsigned short CalcheckSum(unsigned short *packet, unsigned int dataSize)
     return ~(sum & 0xFFFF);
 }
 
-RDTPacket mkPacket(int seq, char *data, int len) {
-    RDTPacket pkt;
+Packet mkPacket(int seq, char *data, int len) {
+    Packet pkt;
     pkt.head.seq = seq;
     pkt.head.dataSize = len;
     memcpy(pkt.data, data, len);
-    pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(RDTPacket));
+    pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(Packet));
     return pkt;
 }
-RDTPacket mkPacket(int ack) {
-    RDTPacket pkt;
+Packet mkPacket(int ack) {
+    Packet pkt;
     pkt.head.ack = ack;
     setACK(pkt.head.flag);
-    pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(RDTPacket));
+    pkt.head.checkSum = CalcheckSum((u_short *) &pkt, sizeof(Packet));
     return pkt;
 }
 
-void extractPkt(char * Buffer, RDTPacket pkt)
+void extractPkt(char * Buffer, Packet *pkt)
 {
-    memcpy(Buffer, &pkt, sizeof(RDTPacket));
+    memcpy(Buffer, pkt, sizeof(Packet));
 }
 
-int sendRDTHead(char *buffer, RDTHead *head, SOCKET socket,SOCKADDR_IN addr)
+int sendHead(char *buffer, Head *head, SOCKET socket,SOCKADDR_IN addr)
 {
     int addrLen = sizeof(addr);
-    memcpy(buffer, head, sizeof(RDTHead));
-    return sendto(socket, buffer, sizeof(RDTHead), 0, (SOCKADDR *) &addr, addrLen);
+    memcpy(buffer, head, sizeof(Head));
+    return sendto(socket, buffer, sizeof(Head), 0, (SOCKADDR *) &addr, addrLen);
 }
 
-int  sendRDTPacket(char *buffer, RDTPacket *packet, SOCKET socket,SOCKADDR_IN addr)
+int  sendPacket(char *buffer, Packet *packet, SOCKET socket,SOCKADDR_IN addr)
 {
     int addrLen = sizeof(addr);
-    memcpy(buffer, packet, sizeof(RDTPacket));
-    return sendto(socket, buffer, sizeof(RDTPacket), 0, (SOCKADDR *) &addr, addrLen);
+    memcpy(buffer, packet, sizeof(Packet));
+    return sendto(socket, buffer, sizeof(Packet), 0, (SOCKADDR *) &addr, addrLen);
 }
