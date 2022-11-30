@@ -10,7 +10,7 @@
 #pragma comment(lib, "ws2_32.lib")
 using namespace std;
 
-double MAX_TIMEOUT = 2 * CLOCKS_PER_SEC; //超时重传时间由于是本机上不同端口上数据传输，先初始化为1s
+double MAX_TIMEOUT = 1*CLOCKS_PER_SEC; //超时重传时间由于是本机上不同端口上数据传输，先初始化为1s
 double DELAY_ACK = 0.5 * CLOCKS_PER_SEC; //延迟ACK定时器
 clock_t start;                           //超时计时器
 bool isStop = false;
@@ -179,7 +179,6 @@ DWORD WINAPI clientSend(LPVOID lparam)
     int remain = p->fileLen % MAX_DATA_SIZE ? 1 : 0;
     packetNum += remain;
     cout << "总共需要传输" << packetNum << "个数据包" << endl;
-
     int dataSize;
     int addrLen = sizeof(p->serverAddr);
     char *dataBuffer = new char[MAX_DATA_SIZE], *pktBuffer = new char[sizeof(Packet)];
@@ -191,9 +190,8 @@ DWORD WINAPI clientSend(LPVOID lparam)
             return 0;
         if (clock() - start > MAX_TIMEOUT)
         {
-            cout << "超时重传" << base << "到" << nextseqnum - 1 << endl;
+            cout << "重传" << base << "到" << nextseqnum - 1 << endl;
             int count = nextseqnum - base;
-
             int tmp = base;
             for (int i = 0; i < count; i++)
             {
@@ -206,7 +204,7 @@ DWORD WINAPI clientSend(LPVOID lparam)
                 Packet sendPkt = mkPacket(tmp, dataBuffer, dataSize);
                 memcpy(pktBuffer, &sendPkt, sizeof(Packet));
                 sendto(p->clientSocket, pktBuffer, sizeof(Packet), 0, (SOCKADDR *)&p->serverAddr, addrLen);
-                cout << tmp << "号数据包已经重新发送" << endl;
+                //cout << tmp << "号数据包已经重新发送" << endl;
                 tmp++;
             }
             start = clock();
@@ -229,13 +227,12 @@ DWORD WINAPI clientSend(LPVOID lparam)
                     // if (base == nextseqnum) {
                     //     start = clock();
                     // }
-
-                    cout << nextseqnum << "号数据包已经发送" << endl;
                     nextseqnum++;
+                    cout << "base:  " << base << "nextseqnum: " << nextseqnum << "end:   " << base + windowSize << endl;
+                    start = clock();
                 }
                 else
                     break;
-                start = clock();
             }
         }
     }
@@ -243,7 +240,11 @@ DWORD WINAPI clientSend(LPVOID lparam)
 
 DWORD WINAPI clientRecv(LPVOID lparam)
 {
+    
     Parameters *p = (Parameters *)lparam;
+    int packetNum = int(p->fileLen / MAX_DATA_SIZE);
+    int remain = p->fileLen % MAX_DATA_SIZE ? 1 : 0;
+    packetNum += remain;
     char *dataBuffer = new char[MAX_DATA_SIZE], *pktBuffer = new char[sizeof(Packet)];
     Packet rcvPkt;
     int addrLen = sizeof(p->serverAddr);
@@ -255,17 +256,17 @@ DWORD WINAPI clientRecv(LPVOID lparam)
 
             if (base > rcvPkt.head.ack||CalcheckSum((u_short *) &rcvPkt, sizeof(Packet)) != 0) //忽略相同的ACK
             {
-                cout << "收到错误的ACK:    " << rcvPkt.head.ack << "期望收到的ACK:    " << base << endl;
+                //cout << "收到错误的ACK:    " << rcvPkt.head.ack << "期望收到的ACK:    " << base << endl;
             }
             else
             {
-                start = clock();
-                cout << "收到确认 " << rcvPkt.head.ack << endl;
+                //start = clock();
+                //cout << "收到确认 " << rcvPkt.head.ack << endl;
                 base = rcvPkt.head.ack + 1;
             }
-            // cout << "base:  " << base << "nextSeq: " << nextseqnum << "endWindow:   " << base + windowSize << endl;
+           
 
-            if (base == nextseqnum)
+            if (base == nextseqnum&&base==packetNum+1)
             {
                 Head endPacket;
                 setEND(endPacket.flag);
@@ -285,7 +286,6 @@ DWORD WINAPI clientRecv(LPVOID lparam)
                         start = clock();
                     }
                 }
-
                 if (((Head *)(pktBuffer))->flag & ACK &&
                     CalcheckSum((u_short *)pktBuffer, sizeof(Head)) == 0)
                 {
@@ -362,12 +362,12 @@ int main()
     p.serverAddr = serverAddr;
 
     u_long imode = 1;
-    ioctlsocket(clientSocket, FIONBIO, &imode); //先进入阻塞模式
+    ioctlsocket(clientSocket, FIONBIO, &imode); //先进入非阻塞模式
     HANDLE hthread[2];
     hthread[0] = CreateThread(NULL, 0, clientRecv, (LPVOID)&p, 0, NULL);
     hthread[1] = CreateThread(NULL, 0, clientSend, (LPVOID)&p, 0, NULL);
     WaitForSingleObject(hthread[0], INFINITE);
-    // WaitForSingleObject(hthread[1], INFINITE);
+    WaitForSingleObject(hthread[1], INFINITE);
     if (!DisConServer(clientSocket, serverAddr))
     {
         cout << "关闭连接失败" << endl;

@@ -70,7 +70,20 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
         memset(pktBuffer, 0, sizeof(Packet));
         recvfrom(socket, pktBuffer, sizeof(Packet), 0, (SOCKADDR *) &addr, &addrLen);
         memcpy(&recvPkt,pktBuffer, sizeof(Packet));
-        cout<<"recv"<<endl;
+        if(recvPkt.head.seq==expectedSeq && CalcheckSum((u_short*)&recvPkt, sizeof(Packet))==0){
+            //收到正确的ack；
+            sendPkt = mkPacket(expectedSeq);
+            memcpy(pktBuffer, &sendPkt, sizeof(Packet));
+            sendto(socket, pktBuffer, sizeof(Packet), 0, (SOCKADDR *) &addr, addrLen);
+    
+            dataLen = recvPkt.head.dataSize;
+            memcpy(fileBuffer + filelen, recvPkt.data, dataLen);
+            filelen += dataLen;
+            cout<<"send ack"<<expectedSeq<<endl;
+            expectedSeq++;
+           
+            continue;
+        }
         if (isEND(recvPkt.head.flag) && CalcheckSum((u_short*)&recvPkt, sizeof(Head))==0) {
             cout << "传输完毕" << endl;
             Head endPacket;
@@ -81,21 +94,7 @@ bool recv(char *fileBuffer, SOCKET &socket, SOCKADDR_IN &addr, unsigned long &fi
             return true;
         }
 
-        if(recvPkt.head.seq==expectedSeq && CalcheckSum((u_short*)&recvPkt, sizeof(Packet))==0){
-            //correctly receive the expected seq
-            dataLen = recvPkt.head.dataSize;
-            memcpy(fileBuffer + filelen, recvPkt.data, dataLen);
-            filelen += dataLen;
-
-            //give back ack=seq
-            sendPkt = mkPacket(expectedSeq);
-            memcpy(pktBuffer, &sendPkt, sizeof(Packet));
-            sendto(socket, pktBuffer, sizeof(Packet), 0, (SOCKADDR *) &addr, addrLen);
-            cout<<"发送确认"<<expectedSeq;
-            expectedSeq++;
-            //cout<<"recv"<<endl;
-            continue;
-        }
+        
         cout<<"wait head:"<<expectedSeq<<endl;
         cout<<"recv head:"<<recvPkt.head.seq<<endl;
         memcpy(pktBuffer, &sendPkt, sizeof(Packet));

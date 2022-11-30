@@ -3,7 +3,7 @@
 #include<winsock.h>
 using namespace std;
 
-#define MAX_DATA_SIZE 10240
+#define MAX_DATA_SIZE 5120
 #define windowSize 8
 #define MAX_SEQ  4294967295
 unsigned int base=1;
