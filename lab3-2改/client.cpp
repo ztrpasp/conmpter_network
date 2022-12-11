@@ -190,7 +190,7 @@ DWORD WINAPI clientSend(LPVOID lparam)
             return 0;
         if (clock() - start > MAX_TIMEOUT)
         {
-            cout << "重传" << base << "到" << nextseqnum - 1 << endl;
+            cout << "超时！重传" << base << "到" << nextseqnum - 1 <<"号数据"<< endl;
             int count = nextseqnum - base;
             int tmp = base;
             for (int i = 0; i < count; i++)
@@ -224,12 +224,12 @@ DWORD WINAPI clientSend(LPVOID lparam)
                     Packet sendPkt = mkPacket(nextseqnum, dataBuffer, dataSize);
                     memcpy(pktBuffer, &sendPkt, sizeof(Packet));
                     sendto(p->clientSocket, pktBuffer, sizeof(Packet), 0, (SOCKADDR *)&p->serverAddr, addrLen);
-                    // if (base == nextseqnum) {
-                    //     start = clock();
-                    // }
+                    if (base == nextseqnum) {
+                        start = clock();
+                    }
                     nextseqnum++;
                     cout << "base:  " << base << "nextseqnum: " << nextseqnum << "end:   " << base + windowSize << endl;
-                    start = clock();
+                    //start = clock();
                 }
                 else
                     break;
@@ -260,7 +260,7 @@ DWORD WINAPI clientRecv(LPVOID lparam)
             }
             else
             {
-                //start = clock();
+                start = clock();
                 //cout << "收到确认 " << rcvPkt.head.ack << endl;
                 base = rcvPkt.head.ack + 1;
             }
